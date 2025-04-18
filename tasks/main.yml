@@ -1,0 +1,95 @@
+---
+- name: Mettre à jour les paquets
+  apt:
+    update_cache: yes
+
+- name: Installer les paquets nécessaires
+  apt:
+    name:
+      - apache2
+      - php
+      - libapache2-mod-php
+      - php-mysql
+      - mariadb-server
+      - wget
+      - unzip
+    state: present
+
+- name: Supprimer la page par défaut d'Apache
+  file:
+    path: /var/www/html/index.html
+    state: absent
+
+- name: Démarrer Apache
+  service:
+    name: apache2
+    state: started
+
+- name: Démarrer MariaDB
+  command: mysqld_safe --datadir=/var/lib/mysql
+  async: 10
+  poll: 0
+
+- name: Attendre que MariaDB démarre
+  wait_for:
+    port: 3306
+    state: started
+
+- name: Sécuriser MariaDB
+  mysql_user:
+    name: root
+    host: localhost
+    password: "{{ wordpress_admin_password }}"
+    priv: "*.*:ALL,GRANT"
+
+- name: Créer la base de données WordPress
+  mysql_db:
+    name: "{{ wordpress_db_name }}"
+    state: present
+
+- name: Créer l'utilisateur WordPress
+  mysql_user:
+    name: "{{ wordpress_db_user }}"
+    password: "{{ wordpress_db_password }}"
+    priv: "{{ wordpress_db_name }}.*:ALL"
+    host: "{{ wordpress_db_host }}"
+    state: present
+
+- name: Télécharger WordPress
+  get_url:
+    url: https://wordpress.org/latest.zip
+    dest: /tmp/latest.zip
+
+- name: Extraire WordPress
+  unarchive:
+    src: /tmp/latest.zip
+    dest: /var/www/html
+    remote_src: yes
+
+- name: Configurer les permissions
+  file:
+    path: /var/www/html
+    owner: www-data
+    group: www-data
+    recurse: yes
+
+- name: Configurer wp-config.php
+  template:
+    src: wp-config.php.j2
+    dest: /var/www/html/wp-config.php
+    owner: www-data
+    group: www-data
+    mode: '0640'
+
+- name: Configurer Apache pour WordPress
+  template:
+    src: wordpress.conf.j2
+    dest: /etc/apache2/sites-available/wordpress.conf
+
+- name: Activer le site WordPress
+  command: a2ensite wordpress.conf
+  notify: Restart Apache
+
+- name: Activer le module rewrite
+  command: a2enmod rewrite
+  notify: Restart Apache
